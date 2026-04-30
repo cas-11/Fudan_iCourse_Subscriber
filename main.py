@@ -146,6 +146,9 @@ def process_lecture(
         print(f"    [URL] {vpn_url[:100]}...")
 
         max_attempts = 3
+        best_duration = -1.0
+        best_transcript = ""
+        best_segments: list[dict] = []
         for attempt in range(1, max_attempts + 1):
             try:
                 transcript, transcript_segments = transcriber.transcribe_url(
@@ -154,6 +157,13 @@ def process_lecture(
                 db.update_transcript(sub_id, transcript)
                 break
             except IncompleteAudioError as e:
+                # transcriber stashes the partial result on _last_*; remember
+                # the *longest* attempt so a fluky shorter retry doesn't
+                # overwrite an earlier mostly-complete one.
+                if transcriber._last_duration > best_duration:
+                    best_duration = transcriber._last_duration
+                    best_transcript = transcriber._last_transcript
+                    best_segments = transcriber._last_segments
                 print(f"    [WARN] Attempt {attempt}/{max_attempts}: {e}")
                 if attempt < max_attempts:
                     # Re-login and get fresh URL for retry
@@ -162,9 +172,12 @@ def process_lecture(
                     vpn_url, http_headers = client.get_stream_params(video_url)
                     print(f"    Retrying with fresh connection...")
                 else:
-                    print(f"    [FAIL] All {max_attempts} attempts got incomplete audio, using best result.")
-                    transcript = transcriber._last_transcript
-                    transcript_segments = transcriber._last_segments
+                    print(
+                        f"    [FAIL] All {max_attempts} attempts got incomplete audio, "
+                        f"using longest ({best_duration:.0f}s)."
+                    )
+                    transcript = best_transcript
+                    transcript_segments = best_segments
                     db.update_transcript(sub_id, transcript)
             except NoAudioStreamError as e:
                 print(f"    [SKIP] Video-only (no audio stream): {e}")
