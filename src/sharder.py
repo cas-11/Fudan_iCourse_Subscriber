@@ -250,6 +250,10 @@ def load_index(index_path: str, password: str) -> dict:
     with open(index_path, "rb") as f:
         encrypted = f.read()
     plaintext = crypto_box.decrypt(encrypted, password)
+    if not crypto_box.is_json_obj(plaintext):
+        raise ValueError(
+            "decrypted index does not look like JSON — wrong password?"
+        )
     return json.loads(plaintext)
 
 
@@ -274,6 +278,11 @@ def reassemble_database(
             with open(shard_path, "rb") as f:
                 encrypted = f.read()
             gzipped = crypto_box.decrypt(encrypted, password)
+            if not crypto_box.is_gzip(gzipped):
+                raise ValueError(
+                    f"decrypted shard {shard['name']!r} is not gzip — "
+                    f"wrong password?"
+                )
             raw = gzip.decompress(gzipped)
 
             with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:

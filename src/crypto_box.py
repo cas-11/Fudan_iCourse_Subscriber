@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from typing import Callable
 
 from Crypto.Cipher import AES
 from Crypto.Hash import SHA256
@@ -32,6 +33,30 @@ IV_SIZE = 16
 KEY_IV_SIZE = KEY_SIZE + IV_SIZE  # 48
 NEW_ITERATIONS = 100_000
 LEGACY_ITERATIONS = 10_000
+
+
+# ── Plaintext sanity validators ────────────────────────────────────────
+# AES-CBC + PKCS7 has a ~1/256 chance of accepting a wrong key (the last
+# byte of the garbled plaintext happens to be 0x01).  Without a sanity
+# check the random bytes get propagated downstream and either crash with
+# an unhelpful error or, worse, malfunction silently.  Pass one of these
+# to ``decrypt_with_fallback(validate=...)`` to reject false positives so
+# the next key is tried instead.
+
+def is_sqlite(pt: bytes) -> bool:
+    """Legacy single-file uncompressed sqlite db."""
+    return len(pt) >= 16 and pt[:16] == b"SQLite format 3" + bytes([0])
+
+
+def is_gzip(pt: bytes) -> bool:
+    """Gzipped sqlite (legacy compressed db, or a decrypted shard)."""
+    return len(pt) >= 2 and pt[:2] == bytes([0x1F, 0x8B])
+
+
+def is_json_obj(pt: bytes) -> bool:
+    """Encrypted index plaintext is a JSON object/array."""
+    s = pt.lstrip()
+    return bool(s) and s[:1] in (b"{", b"[")
 
 
 def derive_new_password(stuid: str, uispsw: str) -> str:
@@ -99,18 +124,34 @@ def decrypt(blob: bytes, password: str,
 
 def decrypt_with_fallback(blob: bytes, *, stuid: str, uispsw: str,
                           dashscope: str = "",
-                          smtp: str = "") -> tuple[bytes, str]:
+                          smtp: str = "",
+                          validate: Callable[[bytes], bool] | None = None,
+                          ) -> tuple[bytes, str]:
     """Try v2 password first, fall back to legacy.
 
     Returns (plaintext, version_used) where version_used is "v2" or "legacy".
     Caller can use the version to decide whether to re-encrypt with the new key.
 
-    Raises ValueError if neither password succeeds.
+    If ``validate`` is given, the decrypted plaintext must satisfy
+    ``validate(pt) -> True``; otherwise the v2 attempt is rejected and the
+    legacy key is tried.  If the legacy key also fails validation, raises
+    ValueError.  Without a validator a wrong key has ~1/256 chance of
+    decrypting to garbage with valid PKCS7 padding — the validator catches
+    that case using a magic-byte check.
+
+    Raises ValueError if neither password produces a valid plaintext.
     """
     new_pw = derive_new_password(stuid, uispsw)
     try:
-        return decrypt(blob, new_pw, NEW_ITERATIONS), "v2"
-    except (ValueError, Exception):
+        pt = decrypt(blob, new_pw, NEW_ITERATIONS)
+        if validate is None or validate(pt):
+            return pt, "v2"
+    except Exception:
         pass
     legacy_pw = derive_legacy_password(stuid, uispsw, dashscope, smtp)
-    return decrypt(blob, legacy_pw, LEGACY_ITERATIONS), "legacy"
+    pt = decrypt(blob, legacy_pw, LEGACY_ITERATIONS)
+    if validate is not None and not validate(pt):
+        raise ValueError(
+            "decryption produced bytes that did not pass plaintext validation"
+        )
+    return pt, "legacy"

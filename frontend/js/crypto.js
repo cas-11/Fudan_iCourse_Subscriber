@@ -98,20 +98,52 @@ function _icsBuildPasswordLegacy(secrets) {
          (secrets.dashscope || "") + (secrets.smtp || "");
 }
 
-async function _icsDecryptWithFallback(encryptedBytes, secrets) {
+/* Plaintext sanity validators — mirrors src/crypto_box.py. AES-CBC + PKCS7
+   has a ~1/256 chance of accepting a wrong key (the last byte happens to be
+   0x01).  Pass one of these to decryptWithFallback so the wrong-key case
+   gets rejected and the next key is tried instead of propagating garbage. */
+function _icsIsSqlite(pt) {
+  if (!pt || pt.length < 16) return false;
+  var prefix = "SQLite format 3";
+  for (var i = 0; i < prefix.length; i++) {
+    if (pt[i] !== prefix.charCodeAt(i)) return false;
+  }
+  return pt[15] === 0;
+}
+
+function _icsIsGzip(pt) {
+  return !!pt && pt.length >= 2 && pt[0] === 0x1F && pt[1] === 0x8B;
+}
+
+function _icsIsJsonObj(pt) {
+  if (!pt) return false;
+  for (var i = 0; i < pt.length; i++) {
+    var c = pt[i];
+    if (c === 0x20 || c === 0x09 || c === 0x0A || c === 0x0D) continue;
+    return c === 0x7B || c === 0x5B; // '{' or '['
+  }
+  return false;
+}
+
+async function _icsDecryptWithFallback(encryptedBytes, secrets, validate) {
   try {
     var pwV2 = await _icsBuildPasswordV2(secrets);
-    return {
-      data: await _icsDecrypt(encryptedBytes, pwV2, NEW_ITERATIONS),
-      version: "v2",
-    };
+    var ptV2 = await _icsDecrypt(encryptedBytes, pwV2, NEW_ITERATIONS);
+    if (!validate || validate(ptV2)) {
+      return { data: ptV2, version: "v2" };
+    }
   } catch (e) {
-    var pwLegacy = _icsBuildPasswordLegacy(secrets);
-    return {
-      data: await _icsDecrypt(encryptedBytes, pwLegacy, LEGACY_ITERATIONS),
-      version: "legacy",
-    };
+    // fall through to legacy
   }
+  var pwLegacy = _icsBuildPasswordLegacy(secrets);
+  var ptLegacy = await _icsDecrypt(encryptedBytes, pwLegacy, LEGACY_ITERATIONS);
+  if (validate && !validate(ptLegacy)) {
+    throw new Error(
+      "Decryption produced bytes that did not pass plaintext validation. " +
+      "Wrong credentials?"
+    );
+  }
+  return { data: ptLegacy, version: "legacy" };
 }
 
 window.ICS.crypto = {
@@ -121,6 +153,9 @@ window.ICS.crypto = {
   buildPasswordV2: _icsBuildPasswordV2,
   buildPasswordLegacy: _icsBuildPasswordLegacy,
   decryptWithFallback: _icsDecryptWithFallback,
+  isSqlite: _icsIsSqlite,
+  isGzip: _icsIsGzip,
+  isJsonObj: _icsIsJsonObj,
   NEW_ITERATIONS: NEW_ITERATIONS,
   LEGACY_ITERATIONS: LEGACY_ITERATIONS,
 };

@@ -128,6 +128,11 @@ async function _loadShard(owner, repo, entry, password, token) {
   var gzipped = await ICS.crypto.decrypt(
     encBytes, password, ICS.crypto.NEW_ITERATIONS,
   );
+  if (!ICS.crypto.isGzip(gzipped)) {
+    throw new Error(
+      "Shard '" + entry.name + "' decrypted to non-gzip bytes — wrong key?"
+    );
+  }
   var dbBytes = await _gunzip(gzipped);
   await _idbPut(cacheKey, dbBytes);
   return dbBytes;
@@ -141,6 +146,9 @@ async function _loadFromShardManifest(manifest, owner, repo, password, token, pr
   var indexBytes = await ICS.crypto.decrypt(
     indexEnc, password, ICS.crypto.NEW_ITERATIONS,
   );
+  if (!ICS.crypto.isJsonObj(indexBytes)) {
+    throw new Error("Shard index decrypted to non-JSON bytes — wrong key?");
+  }
   var index = JSON.parse(new TextDecoder().decode(indexBytes));
 
   // 2) Pull every shard (cache hits short-circuit, so only changed shards
@@ -165,7 +173,12 @@ async function _loadFromLegacyBlob(manifest, owner, repo, secrets, token) {
   var encBytes = await ICS.github.fetchBlobBytes(
     owner, repo, manifest.legacy.sha, token,
   );
-  var fallback = await ICS.crypto.decryptWithFallback(encBytes, secrets);
+  var validator = manifest.legacy.compressed
+    ? ICS.crypto.isGzip
+    : ICS.crypto.isSqlite;
+  var fallback = await ICS.crypto.decryptWithFallback(
+    encBytes, secrets, validator,
+  );
   var bytes = fallback.data;
   if (manifest.legacy.compressed) {
     bytes = await _gunzip(bytes);
@@ -375,12 +388,22 @@ document.addEventListener("alpine:init", () => {
           var indexEnc = await ICS.github.fetchBlobBytes(
             this.repoOwner, this.repoName, manifest.index.sha, this.setup.token,
           );
-          await ICS.crypto.decrypt(indexEnc, pw, ICS.crypto.NEW_ITERATIONS);
+          var indexPt = await ICS.crypto.decrypt(
+            indexEnc, pw, ICS.crypto.NEW_ITERATIONS,
+          );
+          if (!ICS.crypto.isJsonObj(indexPt)) {
+            throw new Error("凭据验证失败：索引解密结果不像 JSON。");
+          }
         } else {
           var encBytes = await ICS.github.fetchBlobBytes(
             this.repoOwner, this.repoName, manifest.legacy.sha, this.setup.token,
           );
-          await ICS.crypto.decryptWithFallback(encBytes, this.setup);
+          var legacyValidator = manifest.legacy.compressed
+            ? ICS.crypto.isGzip
+            : ICS.crypto.isSqlite;
+          await ICS.crypto.decryptWithFallback(
+            encBytes, this.setup, legacyValidator,
+          );
         }
         _saveCreds({ ...this.setup });
         _saveSettings({ owner: this.repoOwner, repo: this.repoName, branch: this.dataBranch, iterations: this.iterations });
