@@ -244,6 +244,45 @@ def load_index(index_path: str, password: str) -> dict:
     return json.loads(plaintext)
 
 
+def _migrate_shard_schema(target: sqlite3.Connection) -> None:
+    """Ensure every attached shard has the same columns as ``main``.
+
+    Older shards (created by previous code versions) may lack migration
+    columns like ``old_summary``, which causes ``INSERT ... SELECT *``
+    to fail with a column-count mismatch.  Adding the missing column
+    to the shard before the INSERT makes the ``*`` lists match.
+    """
+    # Collect column names per table from main
+    for table in ("lectures", "ppt_pages", "courses", "all_courses"):
+        main_cols = {
+            row[1] for row in target.execute(
+                f"PRAGMA table_info('{table}')"
+            ).fetchall()
+        }
+        shard_cols = {
+            row[1] for row in target.execute(
+                f"PRAGMA shard.table_info('{table}')"
+            ).fetchall()
+        }
+        # LECTURES_MIGRATION_COLUMNS / PPT_PAGES_MIGRATION_COLUMNS —
+        # import here to avoid circular dependency at module level
+        from src.data.schema import (
+            LECTURES_MIGRATION_COLUMNS,
+            PPT_PAGES_MIGRATION_COLUMNS,
+        )
+        if table == "lectures":
+            migrate = LECTURES_MIGRATION_COLUMNS
+        elif table == "ppt_pages":
+            migrate = PPT_PAGES_MIGRATION_COLUMNS
+        else:
+            migrate = []
+        for col, typedef in migrate:
+            if col in main_cols and col not in shard_cols:
+                target.execute(
+                    f"ALTER TABLE shard.{table} ADD COLUMN {col} {typedef}"
+                )
+
+
 def reassemble_database(
     index: dict, shards_dir: str, output_db: str, password: str,
 ) -> None:
@@ -278,6 +317,12 @@ def reassemble_database(
             try:
                 target.execute("ATTACH DATABASE ? AS shard", (tmp_path,))
                 try:
+                    # If the shard was produced by an older code version that
+                    # lacked a migration column (e.g. old_summary), the
+                    # `SELECT *` INSERT would fail with "N columns but M
+                    # values".  Add the missing column on the attached shard
+                    # first so the `*`-expanded column lists match.
+                    _migrate_shard_schema(target)
                     target.execute(
                         "INSERT OR IGNORE INTO main.courses "
                         "SELECT * FROM shard.courses"
