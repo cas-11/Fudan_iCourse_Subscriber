@@ -148,18 +148,35 @@ async function _loadShard(owner, repo, entry, password, token) {
   return dbBytes;
 }
 
-async function _loadFromShardManifest(manifest, owner, repo, password, token, progress) {
-  // 1) Fetch + decrypt the index (small, never cached)
-  var indexEnc = await ICS.github.fetchBlobBytes(
-    owner, repo, manifest.index.sha, token,
-  );
+async function _fetchAndDecryptIndex(owner, repo, indexSha, password, token) {
+  var indexEnc = await ICS.github.fetchBlobBytes(owner, repo, indexSha, token);
   var indexBytes = await ICS.crypto.decrypt(
     indexEnc, password, ICS.crypto.NEW_ITERATIONS,
   );
   if (!ICS.crypto.isJsonObj(indexBytes)) {
     throw new Error("Shard index decrypted to non-JSON bytes — wrong key?");
   }
-  var index = JSON.parse(new TextDecoder().decode(indexBytes));
+  return JSON.parse(new TextDecoder().decode(indexBytes));
+}
+
+async function _loadFromShardManifest(manifest, owner, repo, password, token, progress) {
+  // 1) Load index: check if index SHA matches cached → reuse decrypted JSON;
+  //    otherwise fetch + decrypt + cache for next time.
+  var cachedIndexSha = null;
+  try { cachedIndexSha = localStorage.getItem(_LS + "indexSha"); } catch (e) {}
+
+  var index = null;
+  if (manifest.index.sha === cachedIndexSha) {
+    index = await _idbGet("index:v2:" + manifest.index.sha);
+  }
+
+  if (!index) {
+    index = await _fetchAndDecryptIndex(
+      owner, repo, manifest.index.sha, password, token,
+    );
+    await _idbPut("index:v2:" + manifest.index.sha, index);
+    try { localStorage.setItem(_LS + "indexSha", manifest.index.sha); } catch (e) {}
+  }
 
   // 2) Pull every shard (cache hits short-circuit, so only changed shards
   //    actually download) and merge them into one in-memory DB.
@@ -266,8 +283,11 @@ document.addEventListener("alpine:init", () => {
           );
         }
 
-        this.courses = this._sortCoursesByStar(ICS.db.getCourses());
+        var sorted = this._sortCoursesByStar(ICS.db.getCourses());
+        this.courses = sorted;
         this.view = "courses";
+        var self = this;
+        this.$nextTick(function () { self.courses = self._sortCoursesByStar(self.courses); });
       } catch (e) {
         this.error = e.message;
         this.view = "error";
@@ -348,6 +368,7 @@ document.addEventListener("alpine:init", () => {
     _scrollToTop() {
       var self = this;
       this.$nextTick(function () {
+        window.scrollTo(0, 0);
         var el = document.querySelector("main");
         if (el) el.scrollTop = 0;
       });

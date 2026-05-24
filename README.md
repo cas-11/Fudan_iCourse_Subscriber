@@ -92,7 +92,7 @@
 
 ## 前端页面（索引与查看）
 
-![alt text](docs\frontend.png)
+![alt text](docs/frontend.png)
 
 本项目自带一个浏览器端加密数据库查看器，部署在 GitHub Pages：
 
