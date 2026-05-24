@@ -35,6 +35,10 @@ test_prod_out/
 # Local decryption dumps (decrypted DB + per-lecture markdown)
 _decrypted_dump/
 
+# Local encryption test artifacts
+_backup_test.gz.enc
+_backup_reencrypted.gz.enc
+
 docs/*
 !docs/*.png
 !docs/frontend-readme.md
