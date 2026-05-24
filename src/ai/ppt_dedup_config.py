@@ -180,6 +180,10 @@ PPT_UI_STOPWORDS: set[str] = {
     "zsh", "bash", "fish",
     # ── Right-click / context menu items ──
     "移动到", "复制到", "移动到复制到",
+    # ── Browser-based PDF / SmallPDF toolbar labels ──
+    "所有工具",                              # SmallPDF "All Tools" sidebar
+    "查找文本或工具Q",                       # SmallPDF search bar
+    "电子签名",                              # SmallPDF e-signature
     # ── PowerPoint slide-sorter status ──
     "回", "□",
     # ── PowerPoint thumbnail sidebar ├──
@@ -276,4 +280,6 @@ UI_NOISE_LINE_PATTERNS: list[str] = [
     r"^文件$",
     # File list column headers
     r"^(名称|修改日期|类型|大小)\s+(名称|修改日期|类型|大小)",
+    # PDF viewer / browser window title with file path
+    r"^[①-⑩]?文件\|(?:C:|D:)?[/\\]Users[/\\]",
 ]
