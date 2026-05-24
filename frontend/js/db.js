@@ -96,7 +96,7 @@ function _queryAll(sql, params) {
 
 function _getCourses() {
   return _queryAll(`
-    SELECT c.course_id, c.title, c.teacher,
+    SELECT c.course_id AS course_id, c.title AS title, c.teacher AS teacher,
            COUNT(CASE WHEN l.summary IS NOT NULL THEN 1 END) AS summary_count,
            COUNT(l.sub_id) AS total_count,
            MAX(l.processed_at) AS last_updated
