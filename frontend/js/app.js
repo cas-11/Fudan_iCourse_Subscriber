@@ -622,13 +622,22 @@ document.addEventListener("alpine:init", () => {
     },
     // ── Load courses for selected terms (not all 20k) ──────────────
     _loadCoursesForTerms() {
-      var ids = new Set(this.subsTerms);
+      // Always include terms that have subscribed courses so the left
+      // column isn't empty when the user switches term filters.
+      var needed = new Set(this.subsTerms);
+      for (var i = 0; i < this.subscribedIds.length; i++) {
+        var sid = this.subscribedIds[i];
+        for (var j = 0; j < this.allCoursesTerms.length; j++) {
+          var t = this.allCoursesTerms[j];
+          if (ICS.db.hasCourseInTerm(sid, t)) needed.add(t);
+        }
+      }
       var all = [];
-      for (var i = 0; i < this.allCoursesTerms.length; i++) {
-        var t = this.allCoursesTerms[i];
-        if (ids.size === 0 || ids.has(t)) {
-          var rows = ICS.db.getAllCourses(t);
-          for (var j = 0; j < rows.length; j++) all.push(rows[j]);
+      for (var k = 0; k < this.allCoursesTerms.length; k++) {
+        var tt = this.allCoursesTerms[k];
+        if (needed.has(tt)) {
+          var rows = ICS.db.getAllCourses(tt);
+          for (var m = 0; m < rows.length; m++) all.push(rows[m]);
         }
       }
       this.allCourses = all;
