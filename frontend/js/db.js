@@ -178,11 +178,13 @@ function _searchSummaries(query, courseIds) {
        OR EXISTS(SELECT 1 FROM ppt_pages pp3 WHERE pp3.sub_id = l.sub_id AND pp3.text LIKE '%' || ? || '%')
   `;
   var whereClauses = ["(" + textMatchClause + ")"];
+  // Params order matches the SQL placeholder order:
+  // 1 (ppt_text) + 4 (CASE hit_field) + 4 (WHERE text match)
   var params = [q, q, q, q, q, q, q, q, q];
   if (courseIds && courseIds.length) {
     var placeholders = courseIds.map(function () { return "?"; }).join(",");
     whereClauses.push("l.course_id IN (" + placeholders + ")");
-    for (var i = 0; i < courseIds.length; i++) params.push(String(courseIds[i]));
+    courseIds.forEach(function (id) { params.push(String(id)); });
   }
   return _queryAll(`
     SELECT l.sub_id, l.sub_title, l.summary, l.transcript,
