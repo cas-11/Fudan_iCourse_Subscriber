@@ -104,15 +104,19 @@ def merge(local_path: str, remote_path: str):
             """)
 
             # 5) PPT pages: merge existing rows.
-            #    Status priority: 'done' > 'failed' > 'pending'.  Text wins if non-null
-            #    on either side (a 'done' row's text is preferred, but COALESCE handles
-            #    the rare case of done-without-text gracefully).
+            #    Status priority: 'done' > 'invalid' > 'dedup_dropped' > 'failed' > 'pending'.
+            #    Text wins if non-null on either side (a 'done' row's text is preferred,
+            #    but COALESCE handles the rare case of done-without-text gracefully).
             conn.execute("""
                 UPDATE main.ppt_pages SET
                     text = COALESCE(l.text, main.ppt_pages.text),
                     ocr_status = CASE
                         WHEN l.ocr_status = 'done' OR main.ppt_pages.ocr_status = 'done'
                             THEN 'done'
+                        WHEN l.ocr_status = 'invalid' OR main.ppt_pages.ocr_status = 'invalid'
+                            THEN 'invalid'
+                        WHEN l.ocr_status = 'dedup_dropped' OR main.ppt_pages.ocr_status = 'dedup_dropped'
+                            THEN 'dedup_dropped'
                         WHEN l.ocr_status = 'failed' OR main.ppt_pages.ocr_status = 'failed'
                             THEN 'failed'
                         ELSE 'pending'

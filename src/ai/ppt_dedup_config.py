@@ -42,7 +42,7 @@ INVALID_PAGE_PATTERNS: list[str] = [
     "多媒体值班室",
     "本教室装有摄录及安全装置",
     # ── Type 2: e-learning resource portal screen ──
-    "cfdfudaneducn",                       # cfd.fudan.edu.cn URL
+    # "cfdfudaneducn",                       # cfd.fudan.edu.cn URL
     "icoursefudaneducn",                   # icourse.fudan.edu.cn URL
     "智慧教学资源平台使用规范",
     "教育部等九部门",
@@ -56,20 +56,20 @@ INVALID_PAGE_PATTERNS: list[str] = [
     "双屏效果展示",
     "课程录制exe",
     "PowerPoint演示文稿",
-    "录像指南",
+    # "录像指南",
     "ev去噪",
     "录制完成桌面会生成",
     "推荐上传至elearning",
     "ppt演示者视图会影响录屏",
     # ── Type 3: Windows file explorer (full-screen) ──
     # Normalised breadcrumb: "此电脑>U盘(D:)>..." → "此电脑u盘"
-    "此电脑", "改日期", "全屏模式", "此电脑本地磁盘",
+    # "此电脑", "改日期", "全屏模式", "此电脑本地磁盘",
     # File-list column headers (normalised: "名称修改日期类型大小")
-    "名称修改日期类型大小",
+    # "名称修改日期类型大小",
     # File picker title bar
     "选择要上传的文件",
     "选择要打开的文件",
-    "打开此文件",
+    # "打开此文件",
     # ── Type 4: Windows lock screen / Ctrl+Alt+Delete ──
     "ctrlaltdel",
     "请按ctrlaltdelete",
@@ -86,13 +86,13 @@ INVALID_PAGE_PATTERNS: list[str] = [
     "checkvideosource",                           # video player overlay
     "无痕模式",                                    # browser incognito mode badge
     # ── Type 8: WPS Office desktop (full-screen, no slide visible) ──
-    "wwpsoffice",
+    # "wwpsoffice",
     # ── Type 9: Chrome / browser chrome ──
     "googlechrome不是您的默认浏览器",
     # ── Type 10: WeChat file-helper URL ──
     "filehelperweixinqqcom",
     # ── Type 11: Tencent Docs online editor (full-screen) ──
-    "腾讯文档手机发令电脑自动干活",
+    # "腾讯文档手机发令电脑自动干活",
 ]
 
 # ── Per-line noise stopwords (clean_ppt_text exact match) ───────────────────
