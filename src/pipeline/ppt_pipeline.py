@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING
 
 from src.api import icourse
 from src.ai.ocr import ocr_image_text
-from src.ai.ppt_dedup import clean_ppt_text, compute_dhash, dedup_dhash, is_invalid_page
+from src.ai.ppt_dedup import clean_ppt_text, compute_dhash, dedup_dhash, is_invalid_page, match_garbage
 
 if TYPE_CHECKING:
     from src.data.database import Database
@@ -212,9 +212,7 @@ class PPTPipeline:
             else:
                 images[page_num] = img
 
-        # Stage 3 — dHash + sliding-window dedup over chronologically
-        # ordered pending rows.  Dhash is also persisted for later
-        # diagnostics (e.g. inspecting dedup decisions across runs).
+        # Stage 3 — dHash computation (pre-OCR dedup).
         dhashes_in_order: list[str | None] = []
         page_at_index: list[int] = []
         for p in pending:
@@ -227,18 +225,30 @@ class PPTPipeline:
             dhashes_in_order.append(dh)
             page_at_index.append(page_num)
 
-        dropped_idx = dedup_dhash(dhashes_in_order)
-        dropped_pages = {page_at_index[i] for i in dropped_idx}
+        # Stage 3a — Garbage-catalog matching.
+        garbage_idx = set(match_garbage(dhashes_in_order))
+        garbage_pages = {page_at_index[i] for i in garbage_idx}
+        for page_num in garbage_pages:
+            self._db.update_ppt_page(sub_id, page_num, None, "dedup_dropped")
+            images.pop(page_num, None)
+
+        # Stage 3b — Pairwise dedup on survivors.
+        survivor_items: list[str | None] = []
+        survivor_pages: list[int] = []
+        for i, dh in enumerate(dhashes_in_order):
+            if i not in garbage_idx:
+                survivor_items.append(dh)
+                survivor_pages.append(page_at_index[i])
+
+        dropped_idx = dedup_dhash(survivor_items)
+        dropped_pages = {survivor_pages[i] for i in dropped_idx}
         for page_num in dropped_pages:
             self._db.update_ppt_page(sub_id, page_num, None, "dedup_dropped")
             images.pop(page_num, None)
 
-        # Stage 4 — optionally submit OCR.  When defer_ocr=True, OCR is
-        # skipped now and submitted lazily in handle.drain() to avoid
-        # CPU contention with ASR (the caller runs ASR between submit
-        # and drain).
+        # Stage 4 — optionally submit OCR.
         keep_images: dict[int, bytes] = {
-            pn: img for pn, img in images.items() if pn not in dropped_pages
+            pn: img for pn, img in images.items()
         }
         futures: list[Future] = []
         if not defer_ocr:
@@ -295,7 +305,7 @@ class PPTPipeline:
             if img:
                 images[pn] = img
 
-        # Dedup
+        # Dedup: garbage catalog first, then pairwise on survivors
         dhashes: list[str | None] = []
         indices: list[int] = []
         for p in pending:
@@ -308,14 +318,28 @@ class PPTPipeline:
             dhashes.append(dh)
             indices.append(pn)
 
-        dropped = {indices[i] for i in dedup_dhash(dhashes)}
+        # Step 1 — garbage-catalog matching
+        garbage_idx = set(match_garbage(dhashes))
+        for i in garbage_idx:
+            pn = indices[i]
+            self._db.update_ppt_page(sub_id, pn, None, "dedup_dropped")
+            images.pop(pn, None)
+
+        # Step 2 — pairwise dedup on survivors
+        survivor_items: list[str | None] = []
+        survivor_indices: list[int] = []
+        for i, dh in enumerate(dhashes):
+            if i not in garbage_idx:
+                survivor_items.append(dh)
+                survivor_indices.append(indices[i])
+
+        dropped = {survivor_indices[i] for i in dedup_dhash(survivor_items)}
         for pn in dropped:
             self._db.update_ppt_page(sub_id, pn, None, "dedup_dropped")
             images.pop(pn, None)
 
-        # Submit OCR — store futures so submit() can drain them if they
-        # haven't completed by the time the next lecture starts.
-        ocr_pages = {pn: img for pn, img in images.items() if pn not in dropped}
+        # Submit OCR
+        ocr_pages = {pn: img for pn, img in images.items()}
         if self._reporter and ocr_pages:
             self._reporter.ocr_progress_start(sub_id, len(ocr_pages))
         futures = [
