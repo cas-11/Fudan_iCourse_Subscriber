@@ -56,17 +56,6 @@ def _migrate_attached(conn: sqlite3.Connection, schema: str):
                 )
 
 
-# OCR status lattice: a row may only move up.  'pending' is the implicit
-# bottom so any settled status from the other side wins over it.
-_PPT_STATUS_RANK = """CASE {col}
-        WHEN 'done' THEN 4
-        WHEN 'invalid' THEN 3
-        WHEN 'dedup_dropped' THEN 2
-        WHEN 'failed' THEN 1
-        ELSE 0
-    END"""
-
-
 def merge(local_path: str, remote_path: str):
     """Merge local changes into remote DB.  Only adds/progresses, never deletes."""
     conn = sqlite3.connect(remote_path)
@@ -123,29 +112,16 @@ def merge(local_path: str, remote_path: str):
                 WHERE main.lectures.sub_id = l.sub_id
             """)
 
-            # 4) PPT pages: insert local-only rows, then progress existing
-            #    rows forward.  A remote row can hold a placeholder status
-            #    ('pending'/'failed') pushed by a concurrent or crashed run;
-            #    if the local side settled the same page higher up the
-            #    lattice (done > invalid > dedup_dropped > failed), its
-            #    text/status must win or the OCR result is silently lost.
+            # 4) PPT pages: insert local-only rows.  Existing rows are left
+            # untouched — as-is by design: a pre-existing bug left many rows
+            # stuck at 'pending' that are really invalid/dedup results, and
+            # "progressing" them here would resurrect that garbage.  If a
+            # row is already in the remote DB, whatever wrote it owns it.
             conn.execute("""
                 INSERT OR IGNORE INTO main.ppt_pages
                     (sub_id, page_num, created_sec, pptimgurl, text, ocr_status, ocr_at, dhash)
                 SELECT sub_id, page_num, created_sec, pptimgurl, text, ocr_status, ocr_at, dhash
                 FROM local.ppt_pages
-            """)
-            conn.execute(f"""
-                UPDATE main.ppt_pages SET
-                    text       = l.text,
-                    ocr_status = l.ocr_status,
-                    ocr_at     = COALESCE(l.ocr_at, main.ppt_pages.ocr_at),
-                    dhash      = COALESCE(l.dhash, main.ppt_pages.dhash)
-                FROM local.ppt_pages l
-                WHERE main.ppt_pages.sub_id = l.sub_id
-                  AND main.ppt_pages.page_num = l.page_num
-                  AND {_PPT_STATUS_RANK.format(col="l.ocr_status")}
-                    > {_PPT_STATUS_RANK.format(col="main.ppt_pages.ocr_status")}
             """)
 
             # 6) all_courses (catalog): upsert local rows into remote.  We take
