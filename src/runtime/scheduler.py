@@ -33,8 +33,10 @@ from src.api import icourse
 class PrefetchCache:
     """Per-lecture image-bytes pre-fetcher driven by the global image pool.
 
-    schedule(client, course_id, sub_id) — fire all image downloads, return
-                                          immediately.  Idempotent.
+    schedule(client, course_id, sub_id) — fetch the PPT list (synchronous,
+                                          a few paginated GETs), fire all
+                                          image downloads into the pool,
+                                          then return.  Idempotent.
     wait(sub_id) -> (items, images)   — block until every download for sub_id
                                           resolves.
     discard(sub_id)                    — drop the cached entry (release bytes).

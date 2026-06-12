@@ -101,20 +101,13 @@ def _enumerate_lectures(client: ICourseClient, db: Database,
                     continue
                 existing = seen_sub_titles.get(title)
                 if existing is None:
-                    # first occurrence — if it has playback, keep it;
-                    # otherwise tentatively store it and look for a
-                    # playback-capable duplicate.
-                    if lec.get("has_playback"):
-                        seen_sub_titles[title] = lec
-                        deduped.append(lec)
-                    else:
-                        seen_sub_titles[title] = lec
-                        deduped.append(lec)
-                elif not existing.get("has_playback") and lec.get("has_playback"):
-                    # replace the earlier no-playback entry with this one
-                    deduped.remove(existing)
                     seen_sub_titles[title] = lec
                     deduped.append(lec)
+                elif not existing.get("has_playback") and lec.get("has_playback"):
+                    # replace the earlier no-playback entry in place so the
+                    # processing order stays chronological
+                    deduped[deduped.index(existing)] = lec
+                    seen_sub_titles[title] = lec
                     reporter.course_dedup_skip(title, existing["sub_id"])
                 else:
                     reporter.course_dedup_skip(title, lec["sub_id"])

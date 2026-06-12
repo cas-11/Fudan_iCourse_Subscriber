@@ -8,16 +8,23 @@ Phases (named like the original ``main.process_lecture`` for diff-friendly
 log greps):
 
   A  short-circuit ``summary already exists`` → mark processed, return.
-  B  ``PPTPipeline.submit``: stages 1-3 inline, OCR jobs submitted to the
-     scheduler pool.  Returns a ``PPTAsyncHandle``.
-  C  schedule **next** lecture's prefetch (image + audio) so its
-     download overlaps with the current lecture's ASR — the audio slot
-     for the next lecture starts filling while we still hold ours.
-  D  if no cached transcript: ``Scheduler.audio_downloader.get`` (blocks
-     for the ffmpeg spawn that AudioDownloader scheduled earlier), then
+  B  ``PPTPipeline.submit`` with ``defer_ocr=True``: stages 1-3 (fetch,
+     register, dedup) run inline; the OCR jobs are held on the returned
+     ``PPTAsyncHandle`` and only enter the pool at drain time, so ASR in
+     Phase D gets the CPU to itself.
+  C  schedule **next** lecture's prefetch (images always; audio only when
+     the next lecture will actually be ASR-transcribed) so its download
+     overlaps with the current lecture's ASR.
+  D  transcript: cached → official iCourse transcript (config-gated,
+     completeness-checked) → ASR.  For ASR, ``Scheduler.audio_downloader
+     .get`` blocks for the ffmpeg spawn scheduled earlier, then
      ``Transcriber.transcribe_tail`` reads PCM from the disk file with
      tail-f semantics while ffmpeg keeps writing.
-  E  ``handle.drain()`` blocks for any remaining OCR jobs.
+  E  ``handle.drain()`` submits the deferred OCR jobs and blocks for them.
+  E2 ``PPTPipeline.prefetch_and_ocr`` spawns a background thread that
+     collects + dedups + OCRs the next lecture's pages, overlapping with
+     this lecture's LLM wait; leftovers are absorbed by the next
+     ``submit``.
   F  ``bucketer.assemble`` builds the prompt; ``Summarizer.summarize``
      calls the LLM round-robin until one succeeds.
   G  persist ``update_summary``, ``mark_processed``, ``clear_error``.
@@ -83,7 +90,7 @@ class LectureRunner:
         self._reporter.lecture_start(course_title, sub_title, date)
 
         existing = self._db.get_lecture(sub_id)
-        # ── Phase A — short-circuit if a v2 summary already exists ──────
+        # ── Phase A — short-circuit if a summary already exists ─────────
         if self._has_summary(existing):
             self._reporter.lecture_skip_v2_done(
                 sub_title, len(existing["summary"])
@@ -91,6 +98,10 @@ class LectureRunner:
             self._schedule_next(next_info)
             self._db.mark_processed(sub_id)
             self._db.clear_error(sub_id)
+            # The return value feeds the email batch — suppress it when
+            # this summary already went out so it isn't re-sent.
+            if existing.get("emailed_at"):
+                return None
             return existing["summary"]
 
         # ── Phase B — submit PPT pipeline (fetch + dedup, no OCR yet) ──
