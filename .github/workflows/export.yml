@@ -129,7 +129,7 @@ jobs:
           EXPORT_COURSE_ID: ${{ inputs.course_id }}
           EXPORT_SUB_IDS: ${{ inputs.sub_ids }}
         run: |
-          if [ -z "$RECEIVER_EMAIL" ]; then
+          if [ -z "$RECEIVER_EMAIL" ] && [ -n "$SMTP_EMAIL" ]; then
             export RECEIVER_EMAIL="$SMTP_EMAIL"
           fi
           case "${{ inputs.export_type }}" in
