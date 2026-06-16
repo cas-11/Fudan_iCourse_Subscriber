@@ -129,6 +129,7 @@ jobs:
           EXPORT_COURSE_ID: ${{ inputs.course_id }}
           EXPORT_SUB_IDS: ${{ inputs.sub_ids }}
         run: |
+          # RECEIVER_EMAIL is optional: fall back to SMTP_EMAIL when omitted.
           if [ -z "$RECEIVER_EMAIL" ] && [ -n "$SMTP_EMAIL" ]; then
             export RECEIVER_EMAIL="$SMTP_EMAIL"
           fi
