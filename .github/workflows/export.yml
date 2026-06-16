@@ -130,7 +130,7 @@ jobs:
           EXPORT_SUB_IDS: ${{ inputs.sub_ids }}
         run: |
           if [ -z "$RECEIVER_EMAIL" ]; then
-            RECEIVER_EMAIL="$SMTP_EMAIL"
+            export RECEIVER_EMAIL="$SMTP_EMAIL"
           fi
           case "${{ inputs.export_type }}" in
             "HTML")
